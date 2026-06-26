@@ -1,0 +1,18 @@
+[build]
+  command = "npm --prefix backend ci && npm --prefix frontend ci && npm --prefix frontend run build"
+  publish = "frontend/dist"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["backend/src/**"]
+
+[[redirects]]
+  from = "/health"
+  to = "/.netlify/functions/health"
+  status = 200
+
+[[redirects]]
+  from = "/analyze-ticket"
+  to = "/.netlify/functions/analyze-ticket"
+  status = 200

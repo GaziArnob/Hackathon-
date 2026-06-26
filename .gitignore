@@ -8,3 +8,6 @@ build/
 coverage/
 tmp/
 npm-debug.log*
+
+# Local Netlify folder
+.netlify
