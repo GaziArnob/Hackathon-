@@ -17,9 +17,9 @@ function sanitizeDecision(decision, context = {}) {
     ['consistent', 'inconsistent', 'insufficient_data'],
     reasoning.evidence_verdict || 'insufficient_data'
   );
-  clean.case_type = normalizeNullableString(clean.case_type || reasoning.case_type || 'general_dispute');
+  clean.case_type = normalizeNullableString(clean.case_type || reasoning.case_type || 'other');
   clean.department = normalizeNullableString(clean.department || reasoning.department || 'customer_support');
-  clean.severity = normalizeEnum(clean.severity, ['low', 'medium', 'high'], reasoning.severity || 'low');
+  clean.severity = normalizeEnum(clean.severity, ['low', 'medium', 'high', 'critical'], reasoning.severity || 'low');
   clean.confidence = normalizeEnum(clean.confidence, ['low', 'medium', 'high'], reasoning.confidence || 'low');
   clean.evidence_summary = clean.evidence_summary || reasoning.evidence_summary || '';
   clean.next_action = clean.next_action || buildNextAction(clean, reasoning);
@@ -80,25 +80,41 @@ function removeRefundPromises(text, safePhrase = SAFE_MONEY_PHRASE) {
 function removeCredentialRequests(text) {
   return text.replace(
     /\b(?:share|send|provide|tell us|give us)\s+(?:your\s+)?(?:otp|pin|password|passcode)\b[^.?!]*/gi,
-    'Please do not share any PIN, OTP, password, or passcode'
+    (match, offset, fullText) => {
+      const prefix = fullText.slice(Math.max(0, offset - 20), offset).toLowerCase();
+      if (/(do not|don't|never|not)\s*$/.test(prefix)) return match;
+      return 'Please do not share any PIN, OTP, password, or passcode';
+    }
   );
 }
 
 function buildNextAction(decision, reasoning) {
+  if (decision.case_type === 'phishing_or_social_engineering') {
+    return 'Escalate to fraud_risk and remind the customer never to share PIN, OTP, or password.';
+  }
+
   if (decision.evidence_verdict === 'insufficient_data') {
     return 'Ask the customer for a transaction ID, exact time, merchant, or recipient detail.';
   }
 
-  if (decision.department === 'merchant_operations') {
-    return 'Route to merchant operations for review.';
+  if (decision.case_type === 'payment_failed') {
+    return 'Route to payments_ops to verify ledger status and eligibility for official reversal handling.';
+  }
+
+  if (decision.case_type === 'merchant_settlement_delay') {
+    return 'Route to merchant_operations to verify settlement batch status and update through official channels.';
+  }
+
+  if (decision.case_type === 'agent_cash_in_issue') {
+    return 'Route to agent_operations to verify cash-in settlement status with the agent record.';
   }
 
   if (decision.evidence_verdict === 'inconsistent') {
-    return 'Explain the evidence mismatch and request supporting details if the customer disputes it.';
+    return 'Flag for human review and verify the evidence mismatch with the customer.';
   }
 
   if (reasoning.case_type === 'duplicate_payment') {
-    return 'Route the duplicate transaction for eligibility review.';
+    return 'Route to payments_ops to verify the duplicate payment before any official reversal handling.';
   }
 
   return 'Route the ticket to the assigned department with the matched evidence.';
@@ -107,23 +123,39 @@ function buildNextAction(decision, reasoning) {
 function buildFallbackReply(decision, reasoning = {}) {
   if (reasoning.language === 'bn') return buildBanglaFallbackReply(decision);
 
-  if (decision.evidence_verdict === 'insufficient_data') {
-    return 'We need one more detail to identify the exact transaction. Please confirm the transaction ID, exact time, merchant, or recipient.';
+  if (decision.case_type === 'phishing_or_social_engineering') {
+    return 'Thank you for reaching out before sharing any information. We never ask for your PIN, OTP, or password under any circumstances. Please do not share these with anyone. Our fraud team has been notified of this incident.';
   }
 
-  if (decision.department === 'merchant_operations') {
-    return `Thank you for the details. We have routed this to merchant operations for review. ${SAFE_MONEY_PHRASE}`;
+  if (decision.evidence_verdict === 'insufficient_data') {
+    return 'Thank you for reaching out. We need one more detail to identify the exact transaction. Please share the transaction ID, exact time, merchant, or recipient. Please do not share your PIN or OTP with anyone.';
+  }
+
+  if (decision.case_type === 'merchant_settlement_delay') {
+    return 'We have noted your settlement concern. Our merchant operations team will check the batch status and update you through official channels.';
+  }
+
+  if (decision.case_type === 'payment_failed') {
+    return `We have noted that this payment may need review by our payments team. ${SAFE_MONEY_PHRASE} Please do not share your PIN or OTP with anyone.`;
+  }
+
+  if (decision.case_type === 'agent_cash_in_issue') {
+    return `We have noted your cash-in concern. Our agent operations team will review the transaction status and contact you through official channels. Please do not share your PIN or OTP with anyone.`;
+  }
+
+  if (decision.case_type === 'refund_request') {
+    return 'Thank you for reaching out. Refund eligibility depends on the transaction and merchant policy. We will guide you through the official support process. Please do not share your PIN or OTP with anyone.';
   }
 
   if (decision.evidence_verdict === 'inconsistent') {
-    return 'Based on the available transaction history, the complaint does not match the evidence we found. Please share any additional supporting details if you want us to review further.';
+    return 'We have received your request. Based on the available transaction history, this case needs careful review before any action can be taken. Please do not share your PIN or OTP with anyone.';
   }
 
   if (decision.case_type === 'duplicate_payment') {
-    return `We found a possible duplicate payment and routed it for review. ${SAFE_MONEY_PHRASE}`;
+    return `We have noted the possible duplicate payment. Our payments team will verify it and ${SAFE_MONEY_PHRASE.toLowerCase()} Please do not share your PIN or OTP with anyone.`;
   }
 
-  return `We found a transaction that matches the complaint details and routed it for review. ${SAFE_MONEY_PHRASE}`;
+  return `We found a transaction that matches the complaint details and routed it for review. Please do not share your PIN or OTP with anyone.`;
 }
 
 function buildBanglaFallbackReply(decision) {

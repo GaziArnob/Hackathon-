@@ -61,13 +61,10 @@ function buildApiResponse(ticket, result) {
     case_type: result.case_type,
     department: normalizeDepartment(result.department),
     severity: result.severity,
-    clarification_needed: result.evidence_verdict === "insufficient_data",
-    draft_reply: result.customer_reply,
     customer_reply: result.customer_reply,
     agent_summary: result.evidence_summary,
     recommended_next_action: result.next_action,
-    human_review_required:
-      result.evidence_verdict === "insufficient_data" || result.severity === "high",
+    human_review_required: shouldRequireHumanReview(result),
     confidence: confidenceToScore(result.confidence),
     reason_codes: [
       result.evidence_verdict,
@@ -80,14 +77,14 @@ function buildApiResponse(ticket, result) {
 }
 
 function normalizeDepartment(department) {
-  const map = {
-    disputes: "dispute_resolution",
-    payments_operations: "payments_ops",
-    fraud_prevention: "fraud_risk",
-    general_support: "customer_support",
-  };
+  return department || "customer_support";
+}
 
-  return map[department] || department || "customer_support";
+function shouldRequireHumanReview(result) {
+  if (result.ambiguity?.length > 0) return true;
+  if (result.severity === "critical") return true;
+  if (["wrong_transfer", "duplicate_payment", "agent_cash_in_issue"].includes(result.case_type)) return true;
+  return false;
 }
 
 function confidenceToScore(confidence) {
